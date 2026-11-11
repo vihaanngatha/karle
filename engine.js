@@ -27,7 +27,7 @@ export function fresh(nowMs) {
   return {
     v: 3, created: dayKey(nowMs), reminders: [], musts: [], timer: null, emergency: {}, results: {},
     seen: { reveal: null, wrapped: null }, lastFinal: null, onboarded: false,
-    settings: { reveal: '21:30', alertAt: '09:00', ping: 'off', autoSend: true, shortcut: 'Karle' }
+    settings: { reveal: '21:30', alertAt: '09:00', ping: 'off', autoSend: true, shortcut: 'Karle', theme: 'dark' }
   };
 }
 export function migrate(s, nowMs) {

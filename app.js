@@ -38,8 +38,18 @@ function commit(msg, fn, { undo = true, keepSheet = false } = {}) {
 }
 function undo() {
   const s = undos.pop(); if (!s) return;
-  st = JSON.parse(s); save(); closeSheet(); render(); toast('Undone');
+  st = JSON.parse(s); save(); applyTheme(); closeSheet(); render(); toast('Undone');
 }
+
+/* ---------- theme ---------- */
+const lightMQ = matchMedia('(prefers-color-scheme: light)');
+function applyTheme() {
+  let t = st.settings.theme || 'dark';
+  if (t === 'auto') t = lightMQ.matches ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', t === 'light' ? '#e7e3df' : '#1f1d1c');
+}
+lightMQ.addEventListener && lightMQ.addEventListener('change', () => { if (st.settings.theme === 'auto') applyTheme(); });
 
 /* ---------- toast ---------- */
 let toastT = null;
@@ -523,6 +533,7 @@ function openSettings() {
     const S = st.settings;
     return `<h3>Settings</h3>
       <div class="field"><label for="f-name">Your name</label><input class="inp" id="f-name" value="${esc(S.name || '')}" placeholder="For the greeting" maxlength="24"></div>
+      <div class="field"><span class="lbl">Look</span>${seg('theme', S.theme || 'dark', [['dark', 'Dark'], ['light', 'Light'], ['auto', 'Match phone']])}</div>
       <div class="field"><span class="lbl">How Karle pings you</span>${seg('ping', S.ping, [['off', 'Off'], ['shortcut', 'Reminders app'], ['calendar', 'Calendar']])}
         <div class="note" data-when="ping=off" ${S.ping === 'off' ? '' : 'hidden'}>A web app can’t send its own notifications on iPhone. Pick one of the other two so you actually get pinged.</div></div>
       <div data-when="ping=shortcut" ${S.ping === 'shortcut' ? '' : 'hidden'} style="display:flex;flex-direction:column;gap:12px">
@@ -554,18 +565,46 @@ function openSettings() {
         <code>must stretch</code><span>a daily must</span></div>
         <div class="note">Swipe a reminder right to finish it, left to push it to tomorrow.</div></div>
       <div class="field"><span class="lbl">Scoring</span><div class="note">Each day: points earned ÷ points planned, out of 100, never below −50. Reminders are worth 2, 6 or 15. Timer musts earn 1 point per 10 minutes. A missed reminder costs 25% more for every day it stays open; finishing it late gives back half. Score shows once at night. Wrapped arrives every Monday.</div></div>
-      <div class="field"><span class="lbl">Backup</span><div class="btns"><button class="btn" data-act="backup">Copy backup</button><button class="btn" data-act="restore-open">Restore</button></div>
-        <div id="restore" hidden style="display:flex;flex-direction:column;gap:10px"><textarea class="inp" id="f-restore" placeholder="Paste a backup here"></textarea><button class="btn main" data-act="restore">Restore this backup</button></div></div>
+      <div class="field"><span class="lbl">Export / import</span>
+        <div class="btns"><button class="btn" data-act="export">Export</button><button class="btn" data-act="import-pick">Import</button></div>
+        <input type="file" id="f-import" accept=".json,application/json" hidden>
+        <div class="note">Export saves everything as one file: to Files, Drive, WhatsApp, anywhere. Import a file to move Karle to a new phone or undo a disaster.${st.lastExport ? ` Last export: ${dayWord(E.dayKey(st.lastExport))}.` : ' You haven’t exported yet.'}</div>
+        <div id="imp" hidden style="display:flex;flex-direction:column;gap:10px"></div></div>
       <button class="btn danger" data-act="erase">Erase everything</button>
       <div class="note" style="text-align:center">Karle 3.0</div>`;
   });
 }
 function saveSettings() {
   commit('Settings saved', s => {
-    Object.assign(s.settings, { name: val('f-name').trim(), ping: segVal('ping'), shortcut: val('f-sc').trim() || s.settings.shortcut || 'Karle', autoSend: swVal('auto'), alertAt: val('f-alert') || '09:00', reveal: val('f-rev') || '21:30' });
+    Object.assign(s.settings, { name: val('f-name').trim(), ping: segVal('ping'), shortcut: val('f-sc').trim() || s.settings.shortcut || 'Karle', autoSend: swVal('auto'), theme: segVal('theme') || 'dark', alertAt: val('f-alert') || '09:00', reveal: val('f-rev') || '21:30' });
   }, { undo: false });
-  closeSheet();
+  applyTheme(); closeSheet();
 }
+
+/* export / import */
+async function exportData() {
+  const name = `karle-${today()}.json`;
+  const file = new File([JSON.stringify(st)], name, { type: 'application/json' });
+  const done = () => commit('Exported', s => { s.lastExport = now(); }, { undo: false });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Karle backup' }); done(); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const url = URL.createObjectURL(file), a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  done();
+}
+let pendingImport = null;
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'f-import' || !e.target.files || !e.target.files[0]) return;
+  const box = $('#imp'); let data;
+  try { data = JSON.parse(await e.target.files[0].text()); } catch { data = null; }
+  if (!data || data.v !== 3 || !Array.isArray(data.reminders) || !Array.isArray(data.musts)) { pendingImport = null; toast('That file isn’t a Karle export'); return; }
+  pendingImport = data;
+  const open = data.reminders.filter(r => !r.done).length;
+  box.innerHTML = `<div class="note">This file has <b>${open} open reminder${open === 1 ? '' : 's'}</b>, ${data.musts.length} must${data.musts.length === 1 ? '' : 's'} and ${Object.keys(data.results || {}).length} scored days${data.lastExport ? `, exported ${shortDate(E.dayKey(data.lastExport))}` : ''}. Importing replaces everything on this phone. You can undo right after.</div>
+    <div class="btns"><button class="btn main" data-act="import-do">Replace with this file</button><button class="btn ghost" data-act="import-cancel">Cancel</button></div>`;
+  box.hidden = false; box.scrollIntoView({ block: 'nearest' });
+});
 
 /* first run */
 function openWelcome() {
@@ -723,19 +762,17 @@ const A = {
   stepn(ds) { const el = $('#f-n'); const v = Math.min(7, Math.max(1, +el.dataset.v + +ds.d)); el.dataset.v = v; el.textContent = `${v}× a week`; },
   'save-settings': saveSettings,
   'test-ping'() { const S = st.settings; S.shortcut = val('f-sc').trim() || 'Karle'; S.ping = 'shortcut'; save(); sendPing({ id: 'test', title: 'Karle test', date: today(), time: E.hhmm(Math.min(nowMinOfDay() + 2, 1439)) }, false); },
-  backup(ds, btn) {
-    const text = JSON.stringify(st);
-    const fallback = () => { $('#restore').hidden = false; const ta = $('#f-restore'); ta.value = text; ta.select(); toast('Select all and copy it'); };
-    try { navigator.clipboard.writeText(text).then(() => toast('Backup copied. Paste it into Notes.'), fallback); } catch { fallback(); }
+  export() { exportData(); },
+  'import-pick'() { const f = $('#f-import'); if (f) { f.value = ''; f.click(); } },
+  'import-do'(ds, btn) {
+    if (!pendingImport) return;
+    if (!confirmTap(btn, 'Tap again. This replaces everything here')) return;
+    const data = pendingImport; pendingImport = null; closeSheet();
+    commit('Imported', x => { Object.keys(x).forEach(k => delete x[k]); Object.assign(x, E.migrate(data, now())); x.onboarded = true; E.finalize(x, today()); });
+    applyTheme();
   },
-  'restore-open'() { $('#restore').hidden = false; },
-  restore(ds, btn) {
-    let s; try { s = JSON.parse(val('f-restore')); } catch { toast('That isn’t a Karle backup'); return; }
-    if (!s || s.v !== 3 || !Array.isArray(s.reminders)) { toast('That isn’t a Karle backup'); return; }
-    if (!confirmTap(btn, 'Tap again to replace everything')) return;
-    closeSheet(); commit('Backup restored', x => { Object.keys(x).forEach(k => delete x[k]); Object.assign(x, E.migrate(s, now())); });
-  },
-  erase(ds, btn) { if (!confirmTap(btn, 'Tap again. This deletes everything')) return; closeSheet(); commit('Erased', s => { Object.keys(s).forEach(k => delete s[k]); Object.assign(s, E.fresh(now())); s.onboarded = true; }); },
+  'import-cancel'() { pendingImport = null; const el = $('#imp'); if (el) el.hidden = true; },
+  erase(ds, btn) { if (!confirmTap(btn, 'Tap again. This deletes everything')) return; closeSheet(); commit('Erased', s => { Object.keys(s).forEach(k => delete s[k]); Object.assign(s, E.fresh(now())); s.onboarded = true; }); applyTheme(); },
   'welcome-done'() { commit(null, s => { s.onboarded = true; s.settings.name = val('f-name').trim(); s.settings.ping = segVal('ping'); }, { undo: false }); closeSheet(); if (st.settings.ping === 'shortcut') toast('Set up the shortcut in Settings when you can'); },
   'reveal-today'() { closeSheet(); if (!showReveal(today())) toast('Nothing scored today yet'); },
   'wrapped-last'() { closeSheet(); showWrapped(E.addDays(E.weekStart(today()), -7)); },
@@ -792,8 +829,15 @@ setInterval(minuteLoop, 30000);
 
 /* ---------- boot ---------- */
 E.finalize(st, today()); save();
-drawDock(); render();
+applyTheme(); drawDock(); render();
+// Launch screen: plays once per open, tap to skip.
+const splash = $('#splash');
+if (splash) {
+  const bye = () => { splash.classList.add('gone'); setTimeout(() => splash.remove(), 300); };
+  splash.addEventListener('click', bye);
+  setTimeout(() => splash.remove(), 2000);
+}
 if (st.timer) { checkAway(); startTick(); }
-if (!st.onboarded) openWelcome(); else maybeMoments();
+setTimeout(() => { if (!st.onboarded) openWelcome(); else maybeMoments(); }, $('#splash') && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 1500 : 0);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 window.karle = { get state() { return st; } };

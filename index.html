@@ -1,15 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Karle</title>
-<meta name="theme-color" content="#e7e3df">
+<meta name="theme-color" content="#1f1d1c">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Karle">
 <meta name="format-detection" content="telephone=no">
+<script>
+// Pick the theme before anything paints, so there's no white flash.
+(function () {
+  var t = 'dark';
+  try { var s = JSON.parse(localStorage.getItem('karle.v3')); if (s && s.settings && s.settings.theme) t = s.settings.theme; } catch (e) {}
+  if (t === 'auto') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelector('meta[name=theme-color]').setAttribute('content', t === 'light' ? '#e7e3df' : '#1f1d1c');
+})();
+</script>
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
@@ -19,6 +29,14 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<div id="splash" aria-hidden="true">
+  <div class="sd">
+    <svg viewBox="0 0 100 100"><circle class="arc" cx="50" cy="50" r="42" pathLength="100"/></svg>
+    <div class="face"><svg viewBox="0 0 24 24"><path class="tick" d="M5 12.5l4.5 4.5L19 7.5" pathLength="100"/></svg></div>
+  </div>
+  <div class="word">Karle</div>
+  <div class="tag">Throw it in. Get it done.</div>
+</div>
 <main id="app"></main>
 <div id="dock"></div>
 <div id="sheet"></div>
